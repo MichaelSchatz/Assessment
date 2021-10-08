@@ -87,7 +87,7 @@ match_records = match_results_use %>%
 
 ```
 
-Below we see the results for male and female teams with the highest win percentage. The female Australian team and the male Netherlands team had the highest win percentages both at 100% in 2019. 
+Below we see the results for male and female teams with the highest win percentage. The **female Australian team** and the **male Netherlands** team had the highest win percentages both at 100% in 2019. 
 
 ```{r q1_pct, echo=TRUE, include = TRUE}
 match_records %>% 
@@ -97,7 +97,7 @@ match_records %>%
         
 ```
 
-And here are the results for male and female teams with the highest win totals. In total wins both the Australian male and female teams led the pack with 10 and 16 wins respectively. The female leaders remained the same, but the male leader in win% vs total wins was different. 
+And here are the results for male and female teams with the highest win totals. In total wins both the **Australian male and female** teams led the pack with 10 and 16 wins respectively. The female leaders remained the same, but the male leader in win% vs total wins was different. 
 
 ```{r q1_pct, echo=TRUE, include = TRUE}
 match_records %>% 
@@ -111,8 +111,27 @@ One of the most important distinctions between these two numbers is the number o
 ```{r q1_total_matches, echo=TRUE, include = TRUE}
 match_records %>% 
   group_by(gender) %>% 
-  filter(rank(desc(Total_Matches)) <= 8) %>% arrange(gender, desc(Total_Matches))  knitr::kable()
+  filter(rank(desc(Total_Matches)) <= 8) %>% arrange(gender, desc(Total_Matches)) %>%   
+  knitr::kable()
         
 ```
 
-Aside from denominators being important, quality of opponent likely is not constant between teams as well. Looking at the Netherland's one match in the set, we see that they played Zimbabwe. I do not know much about the quality of each country's team, but would think that Zimbabwe is a weaker team than say India or Australia. 
+Aside from denominators being important, quality of opponent likely is not constant between teams as well. Looking at the male Netherland's one match in the set, we see that they played Zimbabwe. I do not know much about the quality of each country's team, but would think that Zimbabwe is a weaker team than say India or Pakistan (which the male Australian team played 9 and 6 times respectively)  
+
+```{r q1_competition, echo=FALSE, include = FALSE}
+
+match_results_use %>% filter(teams!="Netherlands" & gender == "male") %>% 
+  inner_join( match_results_use %>% filter(teams=="Netherlands" & gender == "male") %>% select(matchid), by = "matchid") %>%
+  count(teams) 
+
+match_results_use %>% filter(teams!="Australia" & gender == "male") %>% 
+  inner_join(match_results_use %>% filter(teams=="Australia" & gender == "male") %>% select(matchid), by = "matchid") %>% 
+  count(teams) %>% 
+  arrange(desc(n))
+        
+```
+
+## Question 2. 
+
+
+
