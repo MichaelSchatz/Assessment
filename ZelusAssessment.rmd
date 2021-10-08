@@ -1,22 +1,42 @@
 ---
-  title: "Zelus Data Analysis Assessment"
+title: "Zelus Data Analysis Assessment"
 author: "Michael Schatz"
 date: "10/8/2021"
 output: html_document
 ---
   
-  ```{r setup, include=FALSE}
+```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
 ## Read in initial packages 
 library(jsonlite)
 library(dplyr)
+library(googledrive)
+library(purrr)
 
+##Read In Data 
+
+## Default parsing of match results is a little messy so setting simplify vector to FALSE and will parse through myself to get relevant information in a hopefully cleaner format 
+
+match_results = fromJSON("https://drive.google.com/u/0/uc?id=19hVoi9f7n7etcmSXx7WHeiDp9pOLpQvN&export=download", 
+                simplifyVector = TRUE)
+
+##Innings results too large to read in directly so will need to download with googledrive package first then read in. When running this will require some interactivity to work the first time as the user will need to authenticate. If productionizing  I would put this into a separate script or find a more robust way to make the data accessible.  
+
+##I have commented out the download line so the file does not get redownloaded each time I knit the document. 
+
+# drive_download(as_id("1wQO9zr1VH8bY2W4Ca6cMxPdAoPOHo6X6"), "innings_results.json", overwrite = TRUE)
+
+##Read in innings results. Data reads in a little cleaner by default so can leave in its simplified state 
 inning_results = fromJSON("innings_results.json", simplifyVector = TRUE)
 
 ```
 
-0. I would rate my knowledge of cricket as a 2. I knew of the sport and the goal to knock down wickets and score runs by running back and forth. I also knew of the Test and T20 distinctions but did not know the difference between the two, but not much else. I could not name any teams or players. Did not know of any positions outside of the batsment or bowler. I did once accidentally knock a friends tooth out with a cricket bat when I was 10 (but that's a story for another time.)
+
+
+## Question 1. 
+
+I would rate my knowledge of cricket as a 2. I knew of the sport and the goal to knock down wickets and score runs by running back and forth. I also knew of the Test and T20 distinctions but did not know the difference between the two, but not much else. I could not name any teams or players. Did not know of any positions outside of the batsment or bowler. I did once accidentally knock a friends tooth out with a cricket bat when I was 10 (but that's a story for another time).
 
 ![](https://media.giphy.com/media/BsQAVgY6ksvIY/giphy.gif)
 
@@ -25,16 +45,74 @@ inning_results = fromJSON("innings_results.json", simplifyVector = TRUE)
 ## Question 1. 
 
 
-```{r cars}
-summary(cars)
+```{r q1_checks, echo=FALSE, include=FALSE}
+
+## Checking that there are no instances where there isn't just two records per matchid 
+match_results %>% count(matchid) %>% filter(n!=2)
+
+## Check what the possible values for "result" column are and see that NA indicates that there as a winning/losing team. so will now just need to identify DLS method events. 
+match_results %>% count(result)
+
+
+
+## Check outcome.method and see that the D/L value seems to indicate the DLS method matches. Any NA value appears to be a result that we want to include 
+match_results %>% count(outcome.method)
+
+## Here we see that there are also 2 matches (4 rows) where there is still a NA outcome.winner column even with the filter of ties and no.result. We'll chalk that up to messy dat and remove those from our data set as well. 
+ match_results %>% 
+  filter(is.na(result) & is.na(outcome.method)) %>% 
+   count(outcome.winner)
+
 ```
 
-## Including Plots
+First we filter out any no results, ties and DLS matches by finding NA values for results and outcome.method
+```{r q1_base, echo=TRUE}
+match_results_use <- match_results %>% 
+  filter(is.na(result) & is.na(outcome.method) & !is.na(outcome.winner) &
+           lubridate::year(dates) == 2019) 
 
-You can also embed plots, for example:
+valid_row_pct = sprintf("%1.1f%%", 100*nrow(match_results_use)/
+                          nrow(match_results %>% filter(lubridate::year(dates) == 2019))) 
 
-```{r pressure, echo=FALSE}
-plot(pressure)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+We can check and see that we are left with `r valid_row_pct` of rows in the filtered set for 2019.  
+
+```{r q1, echo=TRUE}
+match_records = match_results_use %>% 
+  mutate(Won = outcome.winner == teams) %>%  # define a win by if the winner column is equal to the team column for a given match
+  group_by(teams, gender) %>% 
+  summarise(Total_Wins = sum(Won), Win_PCT = mean(Won), Total_Matches = n()) 
+          
+
+```
+
+Below we see the results for male and female teams with the highest win percentage. The female Australian team and the male Netherlands team had the highest win percentages both at 100% in 2019. 
+
+```{r q1_pct, echo=TRUE, include = TRUE}
+match_records %>% 
+  group_by(gender) %>% 
+  filter(rank(desc(Win_PCT)) == 1)  %>% 
+  knitr::kable()
+        
+```
+
+And here are the results for male and female teams with the highest win totals. In total wins both the Australian male and female teams led the pack with 10 and 16 wins respectively. The female leaders remained the same, but the male leader in win% vs total wins was different. 
+
+```{r q1_pct, echo=TRUE, include = TRUE}
+match_records %>% 
+  group_by(gender) %>% 
+  filter(rank(desc(Total_Wins)) == 1) %>% knitr::kable()
+        
+```
+
+One of the most important distinctions between these two numbers is the number of matches that each team played is not constant. While the male Netherlands team had a 100% win percentage, they also only played in 1 match in all of 2019. Meanwhile the Australian female team played in 10 matches an won all 10. Likewise the Australian male team won 16 matches, but also played in 23 matches (tied for the most of any team with India). While neither in the lead in total wins or win percentage, we can see in the table below that the male England team played in 19 matches and won 14 of them (73.7 Win%) which is higher than Australia's win% of 69.6%. 
+
+```{r q1_total_matches, echo=TRUE, include = TRUE}
+match_records %>% 
+  group_by(gender) %>% 
+  filter(rank(desc(Total_Matches)) <= 8) %>% arrange(gender, desc(Total_Matches))  knitr::kable()
+        
+```
+
+Aside from denominators being important, quality of opponent likely is not constant between teams as well. Looking at the Netherland's one match in the set, we see that they played Zimbabwe. I do not know much about the quality of each country's team, but would think that Zimbabwe is a weaker team than say India or Australia. 
