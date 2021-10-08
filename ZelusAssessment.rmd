@@ -1,0 +1,40 @@
+---
+  title: "Zelus Data Analysis Assessment"
+author: "Michael Schatz"
+date: "10/8/2021"
+output: html_document
+---
+  
+  ```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## Read in initial packages 
+library(jsonlite)
+library(dplyr)
+
+inning_results = fromJSON("innings_results.json", simplifyVector = TRUE)
+
+```
+
+0. I would rate my knowledge of cricket as a 2. I knew of the sport and the goal to knock down wickets and score runs by running back and forth. I also knew of the Test and T20 distinctions but did not know the difference between the two, but not much else. I could not name any teams or players. Did not know of any positions outside of the batsment or bowler. I did once accidentally knock a friends tooth out with a cricket bat when I was 10 (but that's a story for another time.)
+
+![](https://media.giphy.com/media/BsQAVgY6ksvIY/giphy.gif)
+
+
+
+## Question 1. 
+
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
