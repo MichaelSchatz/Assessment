@@ -6,13 +6,15 @@ output: html_document
 ---
   
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 
 ## Read in initial packages 
 library(jsonlite)
 library(dplyr)
 library(googledrive)
 library(purrr)
+library(scales)
+library(ggplot2)
 
 ##Read In Data 
 
@@ -53,7 +55,8 @@ match_results %>% count(matchid) %>% filter(n!=2)
 ## Check what the possible values for "result" column are and see that NA indicates that there as a winning/losing team. so will now just need to identify DLS method events. 
 match_results %>% count(result)
 
-
+## See that there is an outcome.result column as well. Unsure the difference between outcome.result and result columns, but will assume that ties in that column should be removed as well. 
+match_results %>% count(outcome.result)
 
 ## Check outcome.method and see that the D/L value seems to indicate the DLS method matches. Any NA value appears to be a result that we want to include 
 match_results %>% count(outcome.method)
@@ -68,7 +71,7 @@ match_results %>% count(outcome.method)
 First we filter out any no results, ties and DLS matches by finding NA values for results and outcome.method
 ```{r q1_base, echo=TRUE}
 match_results_use <- match_results %>% 
-  filter(is.na(result) & is.na(outcome.method) & !is.na(outcome.winner) &
+  filter(is.na(result) & is.na(outcome.method) & is.na(outcome.result) & !is.na(outcome.winner)  &
            lubridate::year(dates) == 2019) 
 
 valid_row_pct = sprintf("%1.1f%%", 100*nrow(match_results_use)/
@@ -78,11 +81,11 @@ valid_row_pct = sprintf("%1.1f%%", 100*nrow(match_results_use)/
 
 We can check and see that we are left with `r valid_row_pct` of rows in the filtered set for 2019.  
 
-```{r q1, echo=TRUE}
+```{r q1, echo=TRUE, warning=FALSE}
 match_records = match_results_use %>% 
   mutate(Won = outcome.winner == teams) %>%  # define a win by if the winner column is equal to the team column for a given match
   group_by(teams, gender) %>% 
-  summarise(Total_Wins = sum(Won), Win_PCT = mean(Won), Total_Matches = n()) 
+  summarise(Total_Wins = sum(Won), Win_PCT = scales::percent(mean(Won), .1), Total_Matches = n()) 
           
 
 ```
@@ -99,7 +102,7 @@ match_records %>%
 
 And here are the results for male and female teams with the highest win totals. In total wins both the **Australian male and female** teams led the pack with 10 and 16 wins respectively. The female leaders remained the same, but the male leader in win% vs total wins was different. 
 
-```{r q1_pct, echo=TRUE, include = TRUE}
+```{r q1_total, echo=TRUE, include = TRUE}
 match_records %>% 
   group_by(gender) %>% 
   filter(rank(desc(Total_Wins)) == 1) %>% knitr::kable()
@@ -134,4 +137,142 @@ match_results_use %>% filter(teams!="Australia" & gender == "male") %>%
 ## Question 2. 
 
 
+###2b. 
 
+
+```{r q2_base_elo_function, echo=TRUE, include = FALSE}
+
+
+elo_x_win = function(r1, r2, s = 20, rating_dif = r2 - r1) {
+  return( 
+    1/(1+10^((rating_dif)/s)
+       )
+}
+
+elo_rating_update = function(points, r1, r2, s, K){
+  
+  return(r1 + K * (points - elo_x_win(r1, r2, s)))
+}
+
+```
+
+Looking at the two prediction curves below it suggests expected win percentages follow a sigmoid/logistic function and the value of *s* impacts the grows rate or how quickly the expected win rate will change at different rating differences. In this instance the growth is less gradual for the elo than cdf and has a steeper slope around the inflection point. 
+```{r q2b, echo=TRUE, include = FALSE}
+
+rating_dif <- data.frame(rating_dif = c(-30:30))
+
+rating_dif$x_wins <- elo_x_win(r1 = NA, r2 = NA, s= 10, rating_dif = c(-30:30))
+
+rating_dif$cdf = 1 - pnorm(rating_dif$rating_dif, 0, 10)
+
+colors <- c("Sepal Width" = "blue", "Petal Length" = "red", "Petal Width" = "orange")
+
+rating_dif %>% ggplot(aes(x = rating_dif)) +
+  geom_line(aes( y = x_wins, color = "elo"))  +
+  geom_line(aes(y = cdf, color = "cdf")) +
+  scale_color_manual(values = c("elo" = "black", "cdf" = "red")) +
+  ggtitle("Comparing elo and cdf curves at s = 10") 
+
+```
+
+
+###2c. 
+below we can see a practical application calculating the log odds at s = 10 where r_j varies from 1-199. In the graph we can see that the log odds of expected wins is linearly related. Knowing this, one could specify a logistic regression with the formula being $points ~ team_i + team_j.    
+```{r q2c, echo=FALSE, include = TRUE}
+
+
+ratings <- data.frame(rating_i = 100 , rating_j = c(1:199))
+
+ratings$x_wins <- elo_x_win(r1 = ratings$rating_i, r2 = ratings$rating_j, s= 10) 
+
+ratings %>% mutate(logodds = log(x_wins/(1-x_wins))) %>% 
+ggplot(aes(rating_j, logodds)) +
+  geom_point() +
+  ggtitle("Log odds of expected wins by oppontent rating when rating_i = 100")
+
+```
+
+### 2d
+
+```{r q2_elo_function, echo=TRUE, include = FALSE}
+
+
+elo_x_win = function(r1, r2, s = 20) {
+  1/(1+10^((r2 - r1)/s))
+}
+
+elo_rating_update = function(points, r1, r2, s, K){
+  elo_x_win
+  
+ data[i, "pre_match_r"] + K * (data[i,"points"] - x_win)
+}
+
+
+elo_data = function(data, date_column = "dates", R0 = 100, s = 20, K = 20) {
+  
+  if(nrow(data %>% filter(result == "no result"))>0) {
+    warning("data contains no result matches, those will be removed from the data set") 
+  }
+  
+  ## Check if date_column for ordering exists in data frame 
+  if(!date_column %in% names(data)) {
+    stop(paste("Error: Provided date_column name '", date_column, "does not exist in the column names of provided data,
+               please provide a valid column name to order by"))
+  }
+  
+  data <- data %>% ungroup() %>% 
+     filter(coalesce(result, "") != "no result") %>% 
+  mutate(Won = outcome.winner == teams & coalesce(result, outcome.result, "") != "tie", 
+         Loss = outcome.winner != teams & coalesce(result, outcome.result, "") != "tie",
+         points = case_when(Won ~ 1, Loss ~ 0, TRUE ~ .5)
+         ) %>% 
+    arrange(!!sym(date_column))
+  ##set initial rating for teams 
+
+ 
+ #rank games by team in order of date to be able to easily pull the team's ranking prior to a game
+ data <- data %>% group_by(teams, gender) %>% 
+   mutate(team_game_rank = rank(!!sym(date_column))) %>% 
+   ungroup() %>% 
+   data.frame() ## set back to data.frame to deal with differences in dplyr vs base r filter/assignment syntax
+  
+   data$pre_match_r = R0
+ data$post_match_r = as.numeric(NA)
+data$x_win = as.numeric(NA)
+ 
+  for(i in 1:nrow(data)) {
+    
+    # set row being used for reference
+    row_use = data[i,]
+    
+    opponent_row = data %>% filter(matchid ==  row_use$matchid & teams !=  row_use$teams)
+    
+    x_win =  elo_x_win(row_use$pre_match_r, opponent_row$pre_match_r, s = s)
+    
+    data[i,]$x_win = x_win
+    
+    data[i, "post_match_r"] = data[i, "pre_match_r"] + K * (data[i,"points"] - x_win)
+   
+    ## check to see if a row exists/we're at the last game for a team. If not, then update their pregame rating for their next game
+    if(!row_use$team_game_rank == max(data[data$teams == row_use$teams & 
+                                           data$gender == row_use$gender, "team_game_rank"])) {
+    data[data$team_game_rank == row_use$team_game_rank + 1 & 
+           data$teams == row_use$teams & data$gender == row_use$gender, "pre_match_r"] = data[i, "post_match_r"] 
+    }
+  }
+  return(data) 
+}
+
+  
+```
+
+``` {r q2d application, echo=TRUE, include = FALSE}
+
+elo_data_use <- match_results %>% filter(gender == "male" & match_type == "ODI" & coalesce(result, "") != "no result") %>% 
+  mutate(Won = outcome.winner == teams & coalesce(result, "") != "tie", 
+         Loss = outcome.winner != teams & coalesce(result, "") != "tie"
+         )
+
+elo_results = elo_data(elo_data_use)
+
+```
