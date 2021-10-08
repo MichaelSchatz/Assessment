@@ -380,4 +380,71 @@ opt %>% ungroup() %>%  group_by(teams) %>%
 ```
 
 
+## Question 3.  
+``` {r q3_explore, echo=TRUE, include = TRUE}
+## remove no result data. There also appears to be ~7800 rows with NA for matchid. I will remove those as well as there isn't a great way to know which rows belong to each match. 
+inning_data_use = inning_results %>% filter(!is.na(matchid)) %>% 
+  anti_join(match_results %>% 
+           filter(coalesce(result, "") == "no result") %>% select(matchid) %>% unique(), by = "matchid")
+
+
+##There appear to be some duplicate rows caused by the wicket fielder column so next we'll remove that. There also seem to be one other instance of duplicates on a wicket but that did not seem to lead to double counting, as seen below
+
+inning_data_use %>% filter(matchid==238214 &over=="2.1")
+
+## dedupe 
+inning_data_use = inning_data_use %>% select(-wicket.fielders) %>% 
+  distinct() 
+
+## get pertinent information about overs and wickets remaining to summarise 
+inning_data_use <- inning_data_use %>% 
+  ## add over number by using the floor of the over and aggregate runs by over. 
+  mutate(over_number = floor(as.numeric(over)),
+         ## add in a binary for if a wicket occured to be able to calculate remaining wickets.  
+         is_wicket = ifelse(is.na(wicket.kind), 0, 1)) %>% 
+  arrange(matchid, innings, over) %>% 
+  group_by(matchid,  innings) %>% 
+  mutate(wickets_collected = cumsum(is_wicket) - is_wicket ) %>%
+    ungroup() %>% 
+  mutate(wickets_remaining = 10 - wickets_collected,
+         overs_remaining = 50 - over_number) 
+
+##get distinct instances of runs/over/wicket information with one row per over. 
+runs_per_over <- inning_data_use %>% 
+  group_by(matchid, over_number, innings) %>% 
+  mutate(start_wickets_remaining = max(wickets_remaining), 
+         total_runs = sum(runs.total)) %>%  ## get the wickets remaining at the start of the over. 
+  select(matchid, innings, over_number, overs_remaining, start_wickets_remaining, total_runs) %>% 
+    ungroup() %>% 
+  distinct()
+
+
+runs_per_over %>% 
+  ggplot(aes(x=overs_remaining, y= total_runs)) +
+  geom_point(alpha = .1) +
+    geom_smooth()
+
+runs_per_over %>% 
+  ggplot(aes(x=total_runs)) +
+  geom_density(aes(color = as.factor(start_wickets_remaining))) %>% 
+  plotly::ggplotly()
+
+
+runs_per_over %>% 
+  ggplot(aes(x=start_wickets_remaining, y= total_runs)) +
+  geom_point(alpha = .1) +
+    geom_smooth()
+
+##get average runs per over by wickets and overs remaining 
+runs_per_over_avg <- runs_per_over  %>% 
+  group_by(start_wickets_remaining, overs_remaining, innings) %>% 
+  summarise(total_runs = mean(total_runs), total = n())
+
+runs_per_over %>% 
+  ggplot(aes(x=overs_remaining, y = start_wickets_remaining)) +
+  geom_tile(aes(fill = total_runs)) +
+  facet_wrap(~innings)
+
+
+```
 
