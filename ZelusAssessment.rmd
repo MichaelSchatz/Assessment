@@ -147,6 +147,7 @@ elo_x_win = function(r1, r2, s = 20, rating_dif = r2 - r1) {
   return( 
     1/(1+10^((rating_dif)/s)
        )
+  )
 }
 
 elo_rating_update = function(points, r1, r2, s, K){
@@ -208,7 +209,8 @@ elo_rating_update = function(points, r1, r2, s, K){
 }
 
 
-elo_data = function(data, date_column = "dates", R0 = 100, s = 20, K = 20) {
+elo_data_prep = function(data, date_column = "dates") {
+  
   
   if(nrow(data %>% filter(result == "no result"))>0) {
     warning("data contains no result matches, those will be removed from the data set") 
@@ -236,37 +238,56 @@ elo_data = function(data, date_column = "dates", R0 = 100, s = 20, K = 20) {
    ungroup() %>% 
    data.frame() ## set back to data.frame to deal with differences in dplyr vs base r filter/assignment syntax
   
+ return(data)
+}
+  
+
+##function to loop over dataframe and calculate elo 
+elo_data = function(data, date_column = "dates", R0 = 100, s = 20, K = 20, prep_data = TRUE) {
+  
+  ## prep/check data if not assumption is that data is perfect. This is included to help speed up optimizations
+ if(prep_data) {
+  data = elo_data_prep(data, date_column)
+ }
+  
    data$pre_match_r = R0
- data$post_match_r = as.numeric(NA)
-data$x_win = as.numeric(NA)
+  data$post_match_r = as.numeric(NA)
+  data$x_win = as.numeric(NA)
  
   for(i in 1:nrow(data)) {
-    
+ 
     # set row being used for reference
     row_use = data[i,]
     
     opponent_row = data %>% filter(matchid ==  row_use$matchid & teams !=  row_use$teams)
+
+    if(is.na(opponent_row$x_win)) { 
     
-    x_win =  elo_x_win(row_use$pre_match_r, opponent_row$pre_match_r, s = s)
-    
-    data[i,]$x_win = x_win
-    
-    data[i, "post_match_r"] = data[i, "pre_match_r"] + K * (data[i,"points"] - x_win)
-   
+      x_win =  elo_x_win(row_use$pre_match_r, opponent_row$pre_match_r, s = s)
+    } else {
+      x_win = 1 - opponent_row$x_win
+    }
+ 
+    data[i, c("x_win","post_match_r")] = c(x_win, data[i, "pre_match_r"] + K * (data[i,"points"] - x_win))
+
     ## check to see if a row exists/we're at the last game for a team. If not, then update their pregame rating for their next game
+
     if(!row_use$team_game_rank == max(data[data$teams == row_use$teams & 
                                            data$gender == row_use$gender, "team_game_rank"])) {
     data[data$team_game_rank == row_use$team_game_rank + 1 & 
            data$teams == row_use$teams & data$gender == row_use$gender, "pre_match_r"] = data[i, "post_match_r"] 
     }
+
   }
+
+
   return(data) 
 }
 
   
 ```
 
-``` {r q2d application, echo=TRUE, include = FALSE}
+``` {r q2d application, echo=TRUE, include = TRUE}
 
 elo_data_use <- match_results %>% filter(gender == "male" & match_type == "ODI" & coalesce(result, "") != "no result") %>% 
   mutate(Won = outcome.winner == teams & coalesce(result, "") != "tie", 
@@ -275,4 +296,88 @@ elo_data_use <- match_results %>% filter(gender == "male" & match_type == "ODI" 
 
 elo_results = elo_data(elo_data_use)
 
+
+
 ```
+
+
+### 2e. In order to determine "optimal" choices for s and K we will need to decide on an evaluation metric. For this purpose I have chosen to use logloss comparing the wins for each team from a match against the expecting win% from the elo output. This isn't the perfect approach as it does not account for ties in matches, however since only 19 of 1829 matches ended in a tie it seemed like it is okay to treat them as losses for optimization sake.  
+``` {r q2e_simulation, echo=TRUE, include = FALSE}
+library(MLmetrics)
+##check 
+
+## function to run elo and return logloss 
+optim_elo = function(K, s, data, ...) {
+   elo_results <- elo_data(data, K = K, s = s, ...) 
+
+  return(LogLoss(elo_results$x_win, as.numeric(elo_results$Won)))
+}
+
+
+optim_data_prep = elo_data_prep(elo_data_use)
+
+
+results = data.frame(k=NA, s= NA, log_loss=as.numeric(NA))
+start_vals = data.frame(k = 10, s= 10)
+
+library(future)
+plan(multisession, workers = 4)
+
+
+reps = 16
+for(i in 1:reps) {
+  print(i)
+  if(i == 1) {
+    vals_use = start_vals
+  } else {
+    ## Get current min log loss 
+    vals_use = results %>% filter(log_loss == min(log_loss, na.rm = TRUE))
+  }
+  
+    print(vals_use)
+    
+  check_vals = expand.grid(k = c((vals_use$k - 1) : (vals_use$k + 1)), 
+    s = c((vals_use$s - 1) : (vals_use$s + 1))
+    )
+  
+
+
+  ## remove values that have been checked already
+ check_vals_use = check_vals %>% anti_join(results, by = c("k", "s"))
+
+ if(nrow(check_vals_use)==0) {
+   stop("Reached optimal integer value, check results")
+ }
+ print(nrow(check_vals_use))
+ 
+  tic()
+check_vals_use <- check_vals_use %>% 
+  mutate(log_loss = furrr::future_map2_dbl(k, s, optim_elo, data = optim_data_prep, prep_data = FALSE))
+  toc()
+
+  results = bind_rows(results, check_vals_use) %>% filter(!is.na(k))
+  
+}
+
+
+results %>% filter(log_loss == min(log_loss, na.rm = TRUE)) %>% knitr::kable()
+
+
+```
+
+Based on the optimization results we find that a K value of 1 and s value of 13 minimizes the logloss between expected wins and actual outcomes for the dataset. This is a lower value of K than I expected and keeps the range of ratings to any any given point relatively small as well (between 89 and 111). What I would take away from this would be that cricket matches are inherently random and even the worse team will be victorious with some frequency.  For time sake I stuck with optimizing over integers only, but could see a K value below 1 being even more optimal and thus shrinking the rankings even further. Complete last rankings for teams can be seen in the table below. 
+
+``` {r q2e_explore, echo=TRUE, include = TRUE}
+
+opt = elo_data(elo_data_use, K=1, s=14)
+
+opt %>% ungroup() %>%  group_by(teams) %>% 
+  filter(dates == max(dates)) %>% 
+  ungroup() %>% 
+  select(Team = teams, Last_Date_Played = dates, Most_Recent_Ranking = post_match_r) %>% 
+  arrange(desc(Most_Recent_Ranking)) %>% 
+  knitr::kable()
+```
+
+
+
