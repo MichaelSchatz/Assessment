@@ -1,7 +1,7 @@
 ---
 title: "Zelus Data Analysis Assessment"
 author: "Michael Schatz"
-date: "10/8/2021"
+date: "10/9/2021"
 output: html_document
 ---
   
@@ -16,6 +16,7 @@ library(purrr)
 library(scales)
 library(ggplot2)
 library(future)
+library(tidyr)
 ##Read In Data 
 
 ## Default parsing of match results is a little messy so setting simplify vector to FALSE and will parse through myself to get relevant information in a hopefully cleaner format 
@@ -135,6 +136,34 @@ match_results_use %>% filter(teams!="Australia" & gender == "male") %>%
 ```
 
 ## Question 2. 
+
+
+###2a. 
+
+To show that the total rating of $R_{i} + R_{j} are equal after each update, we can start by looking at the update function itself of $R_{i} =  $R_{i} + $K($W_{ij} - $p_{ij}) and $R_{j} =  $R_{j} + $K($W_{ji} - $p_{ji}). 
+
+Since the rating update formulas are linear, should the assumption of total ratings being equal hold true then 
+$W_{ji} - $p_{ji} = -1 * ($W_{ij} - $p_{ij})
+or 
+$W_{ji} - $p_{ji} = - $W_{ij} + $p_{ij})
+
+Since $p_{ji} is an expected win probability, we can also state that  $p_{ji} = 1 - $p_{ij}.   
+
+There are 3 possible values for  $W_{ij} 
+(1 for a win, .5 for a tie and 0 for a loss). 
+
+For all these $W_{ji} = a $W_{ij} 
+
+Substituting these values in we get 
+
+ $W_{ji} - 1 - $p_{ij} =  - $W_{ij} + $p_{ij})
+ 
+ $W_{ji} - 1 - $p_{ij} =  - $W_{ij} + $p_{ij})
+ 
+which can reduce down to and showing that the sum of the two values will always remain equal. 
+$W_{ij} - $p_{ij} = $W_{ij} - $p_{ij} 
+
+
 
 
 ###2b. 
@@ -322,7 +351,7 @@ results = data.frame(k=NA, s= NA, log_loss=as.numeric(NA))
 ## Note that  I changed around some of these starting values from where I initially started to get the optimizing function to converge faster when knitting the final document
 start_vals = data.frame(k = 3, s= 10)
 
-plan(multisession, workers = min(c(parallel::detectCores(), 9, na.rm = TRUE))
+plan(multisession, workers = min(c(parallel::detectCores(), 9, na.rm = TRUE)))
 
 reps = 16
 for(i in 1:reps) {
@@ -392,7 +421,9 @@ After exploring a lot of different plot options (Including some animations of ho
 ## remove no result data. There also appears to be ~7800 rows with NA for matchid. I will remove those as well as there isn't a great way to know which rows belong to each match. 
 inning_data_use = inning_results %>% filter(!is.na(matchid)) %>% 
   anti_join(match_results %>% 
-           filter(coalesce(result, "") == "no result") %>% select(matchid) %>% unique(), by = "matchid")
+           filter(coalesce(result, "") == "no result") %>% select(matchid) %>% unique(), by = "matchid") %>% 
+  inner_join(match_results %>% 
+           filter(gender == "male") %>% select(matchid) %>% unique(), by = "matchid") ## Include only male matches 
 
 
 ##There appear to be some duplicate rows caused by the wicket fielder column so next we'll remove that. There also seem to be one other instance of duplicates on a wicket but that did not seem to lead to double counting, as seen below
@@ -422,7 +453,7 @@ runs_per_over <- inning_data_use %>%
   mutate(start_wickets_remaining = max(wickets_remaining),  ## get the wickets remaining at the start of the over. 
          total_runs = sum(runs.total), 
          bowls_per_over = n_distinct(over)- sum(!is.na(wides))) %>% ##get number of valid bowls per over to see if we need to account for "walkoff" overs 
-  select(matchid, innings, over_number, overs_remaining, start_wickets_remaining, total_runs, bowls_per_over) %>% 
+  select(matchid, innings, over_number, overs_remaining, start_wickets_remaining, total_runs, bowls_per_over, team) %>% 
     ungroup() %>% 
   distinct()
 
@@ -489,4 +520,128 @@ plot_grid(plot_base , plt_dif, ncol = 1)
 From this we can see that runs per over tend to increase as the number of overs remaining decreases and that runs tend to decrease as the number of wickets remain. We also see that run scoring per over tends to be more widely spread in inning 1. Particularly as the number of overs remaining decreases. On a whole one would think that the increase in scoring as overs remaining decrease may be due to fatigue from the bowlers and increased familiarity from batters as to what their bowls look like (similar to what we see in baseball with times through the order penalties). The difference in run scoring late in matches in inning two is potentially due to the batting team in inning 2 having a target number of runs they need to score and as such are less likely to have high run innings at the end of the match because once they surpass the opposing team's run total then the game would conclude. It is harder to come up with concrete theories for why wickets remaining has an effect on run scoring that isn't related to sample bias in that teams with better bowlers/fielders are more likely to find themselves in situations with fewer wickets remaining and are thus more likely to continue preventing runs/getting wickets. Similar sample bias may exist on the overs remaining as well with better batting/worse bowling teams being more likely to find themselves in situations where they have reached a high number of overs without giving up many wickets, thus would be expected to continue to perform above the average. 
 
 In the next section it will be difficult to account for all of these confounding variables, but we do see some clear patterns in terms of how game state may impact run scoring and that combined with some basic quality of competition adjustments should allow us to develop a reasonable model for average run scoring. 
+
+## Question 4. 
+
+When looking at the distribution of runs per over the shape appears fit within a poisson distribution with that and the potential interactive and non-linear effects of overs and wickets remaining, I settled on building a gam model. An added benefit of this modelling framework is that it allows for specification of random effects as well so we can add in rough controls for the batting and bowling team identies along with any other potential confounding variables. Given that the visualization in question 3 was limited to male matches, I opted to limit this model to the same group of matches. 
+
+I experimented with including specific bowler/batsmen identities in the model as random effects, however due to time and compute limitations I opted to exclude them. In a more developed model with adequate resourcing I would anticipate that their inclusion would be beneficial and could provide some insight into individual player skill as a beneficial side effect. 
+
+To validate the model and select an ideal formula and parameters, I did a split half validation, splitting on games played in even/odd days of the year. I chose to ensure that each match was limited to only one half of the validation set as I did not want any model leakage from that, though I did consider splitting on even/odd over numbers. 
+
+One model specification I went back and forth on was whether to specify the interactive smooth of overs and wickets remaining as a tensor spline so I did a test of the two formulas with a little parameter tuning on the k values. The differences ended up being negligible in the smooths so I opted for the s() formula. In the end the model provided a 6% improvement in RMSE over the naive model of using average runs per over. This is a small gain and I think speaks to the difficulty in accurately predicting runs on any given over. I would anticipate over larger aggregate samples that a model like this may perform better than on any given over. 
+
+
+```{r q4_dev, echo=TRUE, include = TRUE}
+library(mgcv)
+
+## pull in player data from first bowl of the over 
+start_inning_data_join <- inning_data_use %>% 
+               filter(substring(over, nchar(over), nchar(over)) == 1) %>% 
+    group_by(matchid, innings, over_number) %>% 
+    mutate(row_rank = rank(over, ties.method = "first")) %>% 
+   ungroup() %>% 
+   filter(row_rank == 1) %>% 
+              select(bowler, over_number, batsman, non_striker, matchid, innings) 
+
+## prepare model data for use 
+dat_use = runs_per_over %>% ungroup() %>% 
+  left_join(match_results %>% select(matchid, dates, match_type, bowl_team = teams), by = "matchid") %>% 
+  filter(team != bowl_team) %>% 
+  left_join( start_inning_data_join, ## get first bowler,batsman and non_striker of over
+            by = c("matchid", "innings", "over_number")) %>% 
+  mutate(Season = lubridate::year(dates),
+         Is_Inning2 = as.numeric(innings == 2),
+         across(any_of(c("bowl_team", "team", "bowler", "batsman", "non_striker","Season")), as.factor)
+         ) %>% 
+
+ ##Check naive model of average runs per over for baseline RMSE 
+  
+  RMSE(dat_use$total_runs, 5.04)
+
+ 
+form = as.formula("total_runs ~ 1 + Is_Inning2 +  s(overs_remaining, start_wickets_remaining, k=100) + s(team, bs='re', k=50) + s(bowl_team, bs='re', k = 50) + s(Season, bs='re', k = 50)")
+
+form2 = as.formula("total_runs ~ 1 + Is_Inning2 +  te(overs_remaining, start_wickets_remaining, k=c(7,7)) + s(team, bs='re', k=50) + s(bowl_team, bs='re', k = 50) + s(Season, bs='re', k = 50)")
+
+
+
+## create function to be able to map over in dataframe for split half validation 
+map_gam = function(data, form, family="poisson", ...) {
+ 
+  gam(form, family=family,
+          data = data, ...)
+  
+}
+
+
+val_data <- dat_use %>% 
+  mutate(split_half = over_number%%2) %>% ## use even/odd day of year for split half validation 
+  group_by(split_half) %>% 
+  tidyr::nest() %>% 
+    crossing(tibble(form = list(form, form2)))
+
+plan(multisession, workers = min(c(nrow(val_data), parallel::detectCores(), na.rm = TRUE)))
+
+tic()
+val_data <- val_data %>% 
+  mutate(models = furrr::future_map2(data, form, map_gam))
+  toc()
+  
+val_data <- val_data %>%   
+   mutate(form_text = map_chr(form, ~as.character(.x) %>% .[3]))
+
+val_data_check =  val_data %>% left_join(val_data %>% 
+                           mutate(split_match = abs(split_half - 1)) %>% select(split_match, models, form_text),
+                         by = c("split_half" = "split_match", "form_text" = "form_text")) 
+
+
+val_data_check <- val_data_check  %>% mutate(pred =  furrr::future_map2(models.y, data, predict, type = "response" , 
+                                                                        newdata.guaranteed = TRUE))
+
+val_data_check %>% select(split_half, data, pred, form_text) %>% 
+  tidyr::unnest(cols = c(data, pred)) %>% 
+  group_by(split_half, form_text) %>% 
+  summarise(RMSE = RMSE(total_runs, pred)) %>% arrange(RMSE) %>% 
+  knitr::kable() 
+
+
+
+fit = gam(form, family="poisson",
+          data = dat_use)
+
+
+fit
+
+```
+
+
+Using the intercept and innings values for the model we can derive the "average team's" expected run per over. For inning 1 the average expected runs per over is `r exp(fit$coefficients[1])` runs and in inning 2 the average expected runs per over is `r exp(fit$coefficients[1] + fit$coefficients[2])` runs. Averaging those two together (Acknowledging that there are likely more actual overs in inning 1, but for the purpose of this I believe we should ignore that assumption), we get an estimate of `r (exp(fit$coefficients[1]) + (exp(fit$coefficients[1] + fit$coefficients[2])))/2 ` Runs per over. 
+
+## Question 5. 
+
+```{r q5  echo=TRUE, include = TRUE}
+rank_results <- opt %>% 
+  filter(lubridate::year(dates) == 2020) %>% 
+  mutate(surprise_rank = rank(desc(points - x_win))) %>% 
+  filter(surprise_rank <=5) %>% 
+  arrange(surprise_rank) %>% 
+  left_join(opt %>% select( opponent = teams, matchid, opponent_rank = pre_match_r), by = "matchid") %>% 
+  filter(opponent != teams) %>% 
+  select(dates, teams, team_rank = pre_match_r, opponent, opponent_rank,  x_win, points) %>% 
+  mutate(x_win =  scales::percent(x_win, .1), team_rank = round(team_rank, 2), 
+         opponent_rank =  round(opponent_rank, 2)) 
+
+```
+
+For defining the most surprising win for men's ODI in 2020 I opted to take a simple approach and utilize the results from the ELO model that was optimized in question 2. Using that model we are able to extract the pre-match win expectation for each match in 2020 based on the team's elo rating and determine which team was victorious while having the lowest expected win probability. With this criteria we find that `r rank_results$teams[1]` defeating `r rank_results$opponent[1]` on `r rank_results$dates[1]` was the most surprising win as they only had an expected win% of `r rank_results$x_win[1]`. A full table of results is below. 
+
+```{r q5_kable  echo=FALSE, include = TRUE}
+
+rank_results %>% 
+  knitr::kable()
+
+
+
+```
 
