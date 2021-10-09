@@ -17,6 +17,8 @@ library(scales)
 library(ggplot2)
 library(future)
 library(tidyr)
+library(knitr)
+
 ##Read In Data 
 
 ## Default parsing of match results is a little messy so setting simplify vector to FALSE and will parse through myself to get relevant information in a hopefully cleaner format 
@@ -39,7 +41,7 @@ inning_results = fromJSON("innings_results.json", simplifyVector = TRUE)
 
 ## Question 1. 
 
-I would rate my knowledge of cricket as a 2. I knew of the sport and the goal to knock down wickets and score runs by running back and forth. I also knew of the Test and T20 distinctions but did not know the difference between the two, but not much else. I could not name any teams or players. Did not know of any positions outside of the batsment or bowler. I did once accidentally knock a friends tooth out with a cricket bat when I was 10 (but that's a story for another time).
+I would rate my knowledge of cricket as a 2. I knew of the sport and the goal to knock down wickets and score runs by running back and forth. I also knew of the Test and T20 distinctions but did not know the difference between the two, but not much else. I could not name any teams or players. Did not know of any positions outside of the batsment or bowler. I did once accidentally knock a friend's tooth out with a cricket bat when I was 10 (but that's a story for another time).
 
 ![](https://media.giphy.com/media/BsQAVgY6ksvIY/giphy.gif)
 
@@ -86,8 +88,8 @@ We can check and see that we are left with `r valid_row_pct` of rows in the filt
 match_records = match_results_use %>% 
   mutate(Won = outcome.winner == teams) %>%  # define a win by if the winner column is equal to the team column for a given match
   group_by(teams, gender) %>% 
-  summarise(Total_Wins = sum(Won), Win_PCT = scales::percent(mean(Won), .1), Total_Matches = n()) 
-          
+
+  summarise(Total_Wins = sum(Won), Win_PCT = scales::percent(mean(Won), .1), Total_Matches = n(), Win_PCT_numeric = mean(Won)) 
 
 ```
 
@@ -96,7 +98,7 @@ Below we see the results for male and female teams with the highest win percenta
 ```{r q1_pct, echo=TRUE, include = TRUE}
 match_records %>% 
   group_by(gender) %>% 
-  filter(rank(desc(Win_PCT)) == 1)  %>% 
+  filter(rank(desc(Win_PCT_numeric)) == 1)  %>% 
   knitr::kable()
         
 ```
@@ -138,6 +140,26 @@ match_results_use %>% filter(teams!="Australia" & gender == "male") %>%
 ## Question 2. 
 
 
+### 2a. 
+
+To show that the total rating of $R_{i} + R_{j}$ are equal after each update, we can start by looking at the update function itself of 
+
+$R_{i} =  R_{i} + K(W_{ij} - p_{ij})$ and $R_{j} =  R_{j} + K(W_{ji} - p_{ji})$. 
+
+Since the rating update formulas are linear, should the assumption of total ratings being equal hold true then 
+$W_{ji} - p_{ji} = -1 * (W_{ij} - p_{ij})$
+or 
+$W_{ji} - p_{ji} = - W_{ij} + p_{ij})$
+
+Since $p_{ji}$ is an expected win probability, we can also state that  $p_{ji} = 1 - p_{ij}$.   
+
+There are 3 possible values for  $W_{ij}$ 
+(1 for a win, .5 for a tie and 0 for a loss). 
+
+For all these $W_{ji} = 1 - W_{ij}$ 
+
+Since both $W_{ji}$ and $p_{ji}$ are both directly related to $W_{ij}$ and $p_{ij}$ and since $W_{ji} + W_{ij} = 1$ and $p_{ji} + p_{ij}= 1$ we know that the sum of the rankings will always remain equal
+
 ###2a. 
 
 To show that the total rating of $R_{i} + R_{j} are equal after each update, we can start by looking at the update function itself of $R_{i} =  $R_{i} + $K($W_{ij} - $p_{ij}) and $R_{j} =  $R_{j} + $K($W_{ji} - $p_{ji}). 
@@ -162,6 +184,8 @@ Substituting these values in we get
  
 which can reduce down to and showing that the sum of the two values will always remain equal. 
 $W_{ij} - $p_{ij} = $W_{ij} - $p_{ij} 
+>>>>>>> 0915f9763b3b964ef74458a0c6325640ba837f4d
+
 
 
 
@@ -170,7 +194,6 @@ $W_{ij} - $p_{ij} = $W_{ij} - $p_{ij}
 
 
 ```{r q2_base_elo_function, echo=TRUE, include = FALSE}
-
 
 elo_x_win = function(r1, r2, s = 20, rating_dif = r2 - r1) {
   return( 
@@ -187,7 +210,10 @@ elo_rating_update = function(points, r1, r2, s, K){
 ```
 
 Looking at the two prediction curves below it suggests expected win percentages follow a sigmoid/logistic function and the value of *s* impacts the grows rate or how quickly the expected win rate will change at different rating differences. In this instance the growth is less gradual for the elo than cdf and has a steeper slope around the inflection point. 
-```{r q2b, echo=TRUE, include = FALSE}
+
+
+```{r q2b, echo=TRUE, include = TRUE, fig.keep="asis"}
+
 
 rating_dif <- data.frame(rating_dif = c(-30:30))
 
@@ -206,10 +232,10 @@ rating_dif %>% ggplot(aes(x = rating_dif)) +
 ```
 
 
-###2c. 
-below we can see a practical application calculating the log odds at s = 10 where r_j varies from 1-199. In the graph we can see that the log odds of expected wins is linearly related. Knowing this, one could specify a logistic regression with the formula being $points ~ team_i + team_j.    
-```{r q2c, echo=FALSE, include = TRUE}
+### 2c. 
+below we can see a practical application calculating the log odds at s = 10 where r_j varies from 1-199. In the graph we can see that the log odds of expected wins is linearly related. Knowing this, one could specify a logistic regression with the formula being $points ~ team_i + team_j. 
 
+```{r q2c, echo=TRUE, include = TRUE}
 
 ratings <- data.frame(rating_i = 100 , rating_j = c(1:199))
 
@@ -222,10 +248,11 @@ ggplot(aes(rating_j, logodds)) +
 
 ```
 
-### 2d
+### 2d. 
 
-```{r q2_elo_function, echo=TRUE, include = FALSE}
+Below is the code for specifying and running the elo implementation 
 
+```{r q2_elo_function, echo=TRUE, include = TRUE}
 
 elo_x_win = function(r1, r2, s = 20) {
   1/(1+10^((r2 - r1)/s))
@@ -330,8 +357,12 @@ elo_results = elo_data(elo_data_use)
 ```
 
 
-### 2e. In order to determine "optimal" choices for s and K we will need to decide on an evaluation metric. For this purpose I have chosen to use logloss comparing the wins for each team from a match against the expecting win% from the elo output. This isn't the perfect approach as it does not account for ties in matches, however since only 19 of 1829 matches ended in a tie it seemed like it is okay to treat them as losses for optimization sake.  
-``` {r q2e_simulation, echo=TRUE, include = FALSE}
+### 2e. 
+
+In order to determine "optimal" choices for s and K we will need to decide on an evaluation metric. For this purpose I have chosen to use logloss comparing the wins for each team from a match against the expecting win% from the elo output. This isn't the perfect approach as it does not account for ties in matches, however since only 19 of 1829 matches ended in a tie it seemed like it is okay to treat them as losses for optimization sake.  
+
+``` {r q2e_simulation, echo=TRUE, include = FALSE, cache=TRUE}
+
 library(MLmetrics)
 ##check 
 
@@ -375,14 +406,14 @@ for(i in 1:reps) {
  check_vals_use = check_vals %>% anti_join(results, by = c("k", "s"))
 
  if(nrow(check_vals_use)==0) {
-   stop("Reached optimal integer value, check results")
+   print("Done! Reached optimal integer value, check results")
+   break()
  }
  print(nrow(check_vals_use))
  
-  tic()
+
 check_vals_use <- check_vals_use %>% 
   mutate(log_loss = furrr::future_map2_dbl(k, s, optim_elo, data = optim_data_prep, prep_data = FALSE))
-  toc()
 
   results = bind_rows(results, check_vals_use) %>% filter(!is.na(k))
   
@@ -532,7 +563,8 @@ To validate the model and select an ideal formula and parameters, I did a split 
 One model specification I went back and forth on was whether to specify the interactive smooth of overs and wickets remaining as a tensor spline so I did a test of the two formulas with a little parameter tuning on the k values. The differences ended up being negligible in the smooths so I opted for the s() formula. In the end the model provided a 6% improvement in RMSE over the naive model of using average runs per over. This is a small gain and I think speaks to the difficulty in accurately predicting runs on any given over. I would anticipate over larger aggregate samples that a model like this may perform better than on any given over. 
 
 
-```{r q4_dev, echo=TRUE, include = TRUE}
+```{r q4_dev, echo=TRUE, include = TRUE, cache=TRUE}
+
 library(mgcv)
 
 ## pull in player data from first bowl of the over 
@@ -553,12 +585,12 @@ dat_use = runs_per_over %>% ungroup() %>%
   mutate(Season = lubridate::year(dates),
          Is_Inning2 = as.numeric(innings == 2),
          across(any_of(c("bowl_team", "team", "bowler", "batsman", "non_striker","Season")), as.factor)
-         ) %>% 
+
+         ) 
 
  ##Check naive model of average runs per over for baseline RMSE 
   
-  RMSE(dat_use$total_runs, 5.04)
-
+RMSE(dat_use$total_runs, 5.04)
  
 form = as.formula("total_runs ~ 1 + Is_Inning2 +  s(overs_remaining, start_wickets_remaining, k=100) + s(team, bs='re', k=50) + s(bowl_team, bs='re', k = 50) + s(Season, bs='re', k = 50)")
 
@@ -583,11 +615,9 @@ val_data <- dat_use %>%
 
 plan(multisession, workers = min(c(nrow(val_data), parallel::detectCores(), na.rm = TRUE)))
 
-tic()
 val_data <- val_data %>% 
   mutate(models = furrr::future_map2(data, form, map_gam))
-  toc()
-  
+
 val_data <- val_data %>%   
    mutate(form_text = map_chr(form, ~as.character(.x) %>% .[3]))
 
@@ -610,17 +640,17 @@ val_data_check %>% select(split_half, data, pred, form_text) %>%
 fit = gam(form, family="poisson",
           data = dat_use)
 
-
-fit
+summary(fit)
 
 ```
 
 
-Using the intercept and innings values for the model we can derive the "average team's" expected run per over. For inning 1 the average expected runs per over is `r exp(fit$coefficients[1])` runs and in inning 2 the average expected runs per over is `r exp(fit$coefficients[1] + fit$coefficients[2])` runs. Averaging those two together (Acknowledging that there are likely more actual overs in inning 1, but for the purpose of this I believe we should ignore that assumption), we get an estimate of `r (exp(fit$coefficients[1]) + (exp(fit$coefficients[1] + fit$coefficients[2])))/2 ` Runs per over. 
+Using the intercept and innings values for the model we can derive the "average team's" expected run per over. For inning 1 the average expected runs per over is `r round(exp(fit$coefficients[1]),2)` runs and in inning 2 the average expected runs per over is `r round(exp(fit$coefficients[1] + fit$coefficients[2]),2)` runs. Averaging those two together (Acknowledging that there are likely more actual overs in inning 1, but for the purpose of this I believe we should ignore that assumption), we get an estimate of `r round((exp(fit$coefficients[1]) + (exp(fit$coefficients[1] + fit$coefficients[2])))/2,2) ` runs per over. 
 
 ## Question 5. 
 
-```{r q5  echo=TRUE, include = TRUE}
+```{r q5,  echo=TRUE, include = TRUE}
+
 rank_results <- opt %>% 
   filter(lubridate::year(dates) == 2020) %>% 
   mutate(surprise_rank = rank(desc(points - x_win))) %>% 
@@ -636,11 +666,10 @@ rank_results <- opt %>%
 
 For defining the most surprising win for men's ODI in 2020 I opted to take a simple approach and utilize the results from the ELO model that was optimized in question 2. Using that model we are able to extract the pre-match win expectation for each match in 2020 based on the team's elo rating and determine which team was victorious while having the lowest expected win probability. With this criteria we find that `r rank_results$teams[1]` defeating `r rank_results$opponent[1]` on `r rank_results$dates[1]` was the most surprising win as they only had an expected win% of `r rank_results$x_win[1]`. A full table of results is below. 
 
-```{r q5_kable  echo=FALSE, include = TRUE}
+```{r q5_kable,  echo=TRUE, include = TRUE}
 
 rank_results %>% 
   knitr::kable()
-
 
 
 ```
